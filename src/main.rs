@@ -4,8 +4,16 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::time::{Instant, Duration};
 
-type SharedState = Arc<Mutex<HashMap<String, String>>>;
+#[derive(Clone, Debug)]
+struct ValueWithExpiry {
+    value: String,
+    expiry: Option<Duration>,
+    insert_time: Instant,
+}
+
+type SharedState = Arc<Mutex<HashMap<String, ValueWithExpiry>>>;
 
 fn parse_args(command: &str) -> Vec<&str> {
     let lines: Vec<&str> = command.split("\r\n").collect();
@@ -69,14 +77,30 @@ async fn handle_client(mut client: TcpStream, state: SharedState) -> Result<()> 
                 }
             }
             "set" => {
-                if commands.len() != 3 {
+                if commands.len() != 3 && commands.len() != 5 {
                     client
                         .write_all(b"-ERR wrong number of arguments for 'SET' command\r\n")
                         .await?;
                     continue;
                 } else {
+                    let value: ValueWithExpiry;
+                    if commands.len() == 5 {
+                        value =  ValueWithExpiry {
+                            value: commands[2].to_string(),
+                            insert_time: Instant::now(),
+                            expiry: Some(Duration::from_millis(commands[4].parse::<u64>().unwrap()))
+
+                        };
+                    } else {
+                        value = ValueWithExpiry {
+                            value: commands[2].to_string(),
+                            insert_time: Instant::now(),
+                            expiry: None
+                        };
+                    }
                     let mut data = state.lock().unwrap();
-                    data.insert(commands[1].to_string(), commands[2].to_string());
+                    println!("Inserting data {:?}", value);
+                    data.insert(commands[1].to_string(), value);
                 }
                 client.write_all(b"+OK\r\n").await?;
             }
@@ -90,11 +114,22 @@ async fn handle_client(mut client: TcpStream, state: SharedState) -> Result<()> 
                         let data = state.lock().unwrap();
                         data.get(commands[1]).cloned()
                     };
+                    println!("Retrived data from db {:?}", return_data);
                     match return_data {
                         Some(n) => {
+                            if n.expiry.is_some() && n.insert_time + n.expiry.unwrap() < tokio::time::Instant::now() {
+                                {
+                                    println!("Data was to old and is being removed, {:?}", n);
+                                    let mut data = state.lock().unwrap();
+                                    data.remove(commands[1]);
+                                }
+                                client.write_all(b"$-1\r\n").await?;
+                                continue;
+                            }
+
                             client
                                 .write_all(
-                                    format!("${}\r\n{}\r\n", n.len().to_string(), n).as_bytes(),
+                                    format!("${}\r\n{}\r\n", n.value.len().to_string(), n.value).as_bytes(),
                                 )
                                 .await?;
                         }
