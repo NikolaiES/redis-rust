@@ -51,11 +51,26 @@ pub async fn handle_set(
     } else {
         let value: ValueWithExpiry;
         if commands.len() == 5 {
-            value = ValueWithExpiry {
-                value: commands[2].to_string(),
-                insert_time: Instant::now(),
-                expiry: Some(Duration::from_millis(commands[4].parse::<u64>().unwrap())),
-            };
+            if commands[3] == "px" {
+                value = ValueWithExpiry {
+                    value: commands[2].to_string(),
+                    insert_time: Instant::now(),
+                    expiry: Some(Duration::from_millis(commands[4].parse::<u64>().unwrap())),
+                };
+            } else if commands[3] == "ex" {
+                value = ValueWithExpiry {
+                    value: commands[2].to_string(),
+                    insert_time: Instant::now(),
+                    expiry: Some(Duration::from_secs(commands[4].parse::<u64>().unwrap())),
+                }
+            } else {
+                client
+                    .write_all(b"-ERR wrong number of arguments for 'SET' command\r\n")
+                    .await?;
+                return Err(anyhow::anyhow!(
+                    "wrong number of arguments for 'SET' command"
+                ));
+            }
         } else {
             value = ValueWithExpiry {
                 value: commands[2].to_string(),
