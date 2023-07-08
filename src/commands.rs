@@ -65,10 +65,10 @@ pub async fn handle_set(
                 }
             } else {
                 client
-                    .write_all(b"-ERR wrong number of arguments for 'SET' command\r\n")
+                    .write_all(b"-ERR wrong argument for 'SET' command\r\n")
                     .await?;
                 return Err(anyhow::anyhow!(
-                    "wrong number of arguments for 'SET' command"
+                    "wrong argument for 'SET' command"
                 ));
             }
         } else {
