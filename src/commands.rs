@@ -9,6 +9,12 @@ pub async fn handle_ping(
     _state: SharedState,
     commands: Vec<&str>,
 ) -> Result<()> {
+    if commands.len() > 2 {
+        client
+            .write_all(b"-ERR wrong number of arguments for 'PING' command\r\n")
+            .await?;
+        eprintln!("ERR wrong number of arguments for 'PING' command")
+    }
     if commands.len() == 1 {
         client.write_all(b"+PONG\r\n").await?;
     } else {
@@ -24,10 +30,11 @@ pub async fn handle_echo(
     _state: SharedState,
     commands: Vec<&str>,
 ) -> Result<()> {
-    if commands.len() < 2 {
+    if commands.len() != 2 {
         client
             .write_all(b"-ERR wrong number of arguments for 'ECHO' command\r\n")
             .await?;
+        eprintln!("ERR wrong number of arguments for 'ECHO' command")
     } else {
         client
             .write_all(format!("+{}\r\n", commands[1]).as_bytes())
@@ -38,18 +45,35 @@ pub async fn handle_echo(
 
 pub async fn handle_set(
     client: &mut TcpStream,
-    _state: SharedState,
+    state: SharedState,
     commands: Vec<&str>,
 ) -> Result<()> {
-    if commands.len() != 3 && commands.len() != 5 {
-        client
-            .write_all(b"-ERR wrong number of arguments for 'SET' command\r\n")
-            .await?;
-        return Err(anyhow::anyhow!(
-            "wrong number of arguments for 'SET' command"
-        ));
-    } else {
+    {
         let value: ValueWithExpiry;
+        let mut skip_next = false;
+        if !check_set_command_syntax(&commands) {
+            client.write_all(b"-ERR syntax error\r\n").await?;
+            return Ok(());
+        }
+        for (index, command) in commands.iter().enumerate() {
+            if skip_next {
+                skip_next = false;
+                continue;
+            }
+            match command {
+                &"px" => {
+                    skip_next = true;
+                    todo!()
+                }
+                &"ex" => {
+                    skip_next = true;
+                    todo!()
+                }
+                _ => {
+                    client.write_all(b"-ERR syntax error\r\n").await?;
+                }
+            }
+        }
         if commands.len() == 5 {
             if commands[3] == "px" {
                 value = ValueWithExpiry {
@@ -67,9 +91,7 @@ pub async fn handle_set(
                 client
                     .write_all(b"-ERR wrong argument for 'SET' command\r\n")
                     .await?;
-                return Err(anyhow::anyhow!(
-                    "wrong argument for 'SET' command"
-                ));
+                return Err(anyhow::anyhow!("wrong argument for 'SET' command"));
             }
         } else {
             value = ValueWithExpiry {
@@ -78,12 +100,37 @@ pub async fn handle_set(
                 expiry: None,
             };
         }
-        let mut data = _state.lock().unwrap();
+        let mut data = state.lock().unwrap();
         println!("Inserting data {:?}", value);
         data.insert(commands[1].to_string(), value);
     }
     client.write_all(b"+OK\r\n").await?;
     return Ok(());
+}
+
+fn check_set_command_syntax(commands: &Vec<&str>) -> bool {
+    let mut px_set = false;
+    let mut ex_set = false;
+
+    for i in 0..commands.len() {
+        match commands[i] {
+            "px" => {
+                if ex_set {
+                    return false;
+                };
+                px_set = true;
+            }
+            "ex" => {
+                if px_set {
+                    return false;
+                }
+                ex_set = true;
+            }
+            _ => continue,
+        }
+    }
+
+    return true;
 }
 
 pub async fn handle_get(
